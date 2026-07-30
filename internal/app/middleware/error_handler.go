@@ -14,17 +14,28 @@ type errorResponse struct {
 }
 
 // ErrorHandler преобразует доменные ошибки (terror) и ошибки Fiber в JSON-тело
-// ответа с корректным HTTP-статусом, логируя при этом ответы с кодом 5xx.
+// ответа с корректным HTTP-статусом, логируя ответы 5xx как Error, а 4xx — как
+// Warn (ранее логировался только код >= 500, а ветка *fiber.Error не
+// логировалась вовсе).
 func ErrorHandler(c *fiber.Ctx, err error) error {
+	var status int
+	var message string
+
 	var fiberErr *fiber.Error
 	if errors.As(err, &fiberErr) {
-		return c.Status(fiberErr.Code).JSON(errorResponse{Error: fiberErr.Message})
+		status = fiberErr.Code
+		message = fiberErr.Message
+	} else {
+		status = terror.HTTPStatus(err)
+		message = err.Error()
 	}
 
-	status := terror.HTTPStatus(err)
-	if status >= 500 {
-		slog.Error("internal error", "error", err, "path", c.Path())
+	switch {
+	case status >= 500:
+		slog.Error("internal error", "error", err, "path", c.Path(), "method", c.Method())
+	case status >= 400:
+		slog.Warn("request error", "error", err, "path", c.Path(), "method", c.Method(), "status", status)
 	}
 
-	return c.Status(status).JSON(errorResponse{Error: err.Error()})
+	return c.Status(status).JSON(errorResponse{Error: message})
 }

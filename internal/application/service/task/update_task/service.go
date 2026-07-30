@@ -16,7 +16,7 @@ import (
 )
 
 type TaskRepository interface {
-	GetByID(ctx context.Context, id uint64) (*entity.Task, error)
+	GetByIDForUpdate(ctx context.Context, id uint64) (*entity.Task, error)
 	Update(ctx context.Context, t entity.Task) error
 }
 
@@ -65,56 +65,60 @@ type Request struct {
 }
 
 func (s *Service) Execute(ctx context.Context, req Request) (entity.Task, error) {
-	current, err := s.tasks.GetByID(ctx, req.TaskID)
-	if err != nil {
-		return entity.Task{}, err
-	}
+	var updated entity.Task
+	var changed bool
 
-	if err := s.authorize(ctx, *current, req.CallerID); err != nil {
-		return entity.Task{}, err
-	}
-
-	updated := *current
-	var entries []entity.TaskHistory
-
-	if req.Title != nil {
-		title := strings.TrimSpace(*req.Title)
-		if title == "" {
-			return entity.Task{}, terror.Validation("title cannot be empty")
+	err := s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		current, err := s.tasks.GetByIDForUpdate(ctx, req.TaskID)
+		if err != nil {
+			return err
 		}
-		if title != current.Title {
-			entries = append(entries, historyEntry(req.TaskID, req.CallerID, "title", current.Title, title))
-			updated.Title = title
+
+		if err := s.authorize(ctx, *current, req.CallerID); err != nil {
+			return err
 		}
-	}
 
-	if req.Description != nil && *req.Description != current.Description {
-		entries = append(entries, historyEntry(req.TaskID, req.CallerID, "description", current.Description, *req.Description))
-		updated.Description = *req.Description
-	}
+		updated = *current
+		var entries []entity.TaskHistory
 
-	if req.Status != nil {
-		if !req.Status.Valid() {
-			return entity.Task{}, terror.Validation("invalid status")
+		if req.Title != nil {
+			title := strings.TrimSpace(*req.Title)
+			if title == "" {
+				return terror.Validation("title cannot be empty")
+			}
+			if title != current.Title {
+				entries = append(entries, historyEntry(req.TaskID, req.CallerID, "title", current.Title, title))
+				updated.Title = title
+			}
 		}
-		if *req.Status != current.Status {
-			entries = append(entries, historyEntry(req.TaskID, req.CallerID, "status", string(current.Status), string(*req.Status)))
-			updated.Status = *req.Status
+
+		if req.Description != nil && *req.Description != current.Description {
+			entries = append(entries, historyEntry(req.TaskID, req.CallerID, "description", current.Description, *req.Description))
+			updated.Description = *req.Description
 		}
-	}
 
-	if req.Assignee != nil && req.Assignee.Provided {
-		if !equalAssignee(current.AssigneeID, req.Assignee.Value) {
-			entries = append(entries, historyEntry(req.TaskID, req.CallerID, "assignee_id", formatAssignee(current.AssigneeID), formatAssignee(req.Assignee.Value)))
-			updated.AssigneeID = req.Assignee.Value
+		if req.Status != nil {
+			if !req.Status.Valid() {
+				return terror.Validation("invalid status")
+			}
+			if *req.Status != current.Status {
+				entries = append(entries, historyEntry(req.TaskID, req.CallerID, "status", string(current.Status), string(*req.Status)))
+				updated.Status = *req.Status
+			}
 		}
-	}
 
-	if len(entries) == 0 {
-		return *current, nil
-	}
+		if req.Assignee != nil && req.Assignee.Provided {
+			if !equalAssignee(current.AssigneeID, req.Assignee.Value) {
+				entries = append(entries, historyEntry(req.TaskID, req.CallerID, "assignee_id", formatAssignee(current.AssigneeID), formatAssignee(req.Assignee.Value)))
+				updated.AssigneeID = req.Assignee.Value
+			}
+		}
 
-	err = s.tx.WithinTx(ctx, func(ctx context.Context) error {
+		if len(entries) == 0 {
+			return nil
+		}
+		changed = true
+
 		if err := s.tasks.Update(ctx, updated); err != nil {
 			return err
 		}
@@ -124,9 +128,14 @@ func (s *Service) Execute(ctx context.Context, req Request) (entity.Task, error)
 		return entity.Task{}, err
 	}
 
+	if !changed {
+		return updated, nil
+	}
+
 	if err := s.cache.InvalidateTeam(ctx, updated.TeamID); err != nil {
 		slog.Warn("task list cache invalidation failed", "team_id", updated.TeamID, "error", err)
 	}
+	slog.Info("task updated", "task_id", req.TaskID, "actor_id", req.CallerID)
 
 	return updated, nil
 }

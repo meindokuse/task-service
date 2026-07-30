@@ -78,6 +78,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	if err := s.cache.InvalidateTeam(ctx, req.TeamID); err != nil {
 		slog.Warn("task list cache invalidation failed", "team_id", req.TeamID, "error", err)
 	}
+	slog.Info("task created", "task_id", id, "team_id", req.TeamID, "created_by", req.CreatedBy)
 
 	return Response{TaskID: id}, nil
 }

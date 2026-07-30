@@ -5,7 +5,9 @@ package task_test
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -16,10 +18,12 @@ import (
 	"github.com/meindokuse/task-service/internal/infrastructure/storage/team_member"
 	"github.com/meindokuse/task-service/internal/infrastructure/storage/user"
 	"github.com/meindokuse/task-service/internal/pkg/terror"
+	"github.com/meindokuse/task-service/internal/pkg/txmanager"
 	"github.com/meindokuse/task-service/internal/testutil/mysqlcontainer"
 )
 
 type fixture struct {
+	db      *sqlx.DB
 	users   *user.Repository
 	teams   *team.Repository
 	members *team_member.Repository
@@ -29,6 +33,7 @@ type fixture struct {
 func newFixture(t *testing.T) fixture {
 	db := mysqlcontainer.Setup(t)
 	return fixture{
+		db:      db,
 		users:   user.New(db),
 		teams:   team.New(db),
 		members: team_member.New(db),
@@ -170,4 +175,53 @@ func TestRepository_OrphanedAssignees(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, orphans, 1)
 	assert.Equal(t, orphanID, orphans[0].ID)
+}
+
+// TestRepository_GetByIDForUpdate_SerializesConcurrentReaders proves the fix
+// for the lost-update race in update_task: a SELECT ... FOR UPDATE taken
+// inside one transaction blocks a second transaction's FOR UPDATE read on the
+// same row until the first commits or rolls back.
+func TestRepository_GetByIDForUpdate_SerializesConcurrentReaders(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	manager := txmanager.New(f.db)
+
+	ownerID, err := f.users.Create(ctx, entity.User{Email: "lock-owner@example.com", PasswordHash: "h", Name: "Owner"})
+	require.NoError(t, err)
+	teamID, err := f.teams.Create(ctx, entity.Team{Name: "Lock Team", CreatedBy: ownerID})
+	require.NoError(t, err)
+	taskID, err := f.tasks.Create(ctx, entity.Task{
+		TeamID: teamID, Title: "Contended task", Status: valueobject.TaskStatusTodo, CreatedBy: ownerID,
+	})
+	require.NoError(t, err)
+
+	lockedCh := make(chan struct{})
+	releaseCh := make(chan struct{})
+	firstTxErrCh := make(chan error, 1)
+
+	go func() {
+		firstTxErrCh <- manager.WithinTx(ctx, func(ctx context.Context) error {
+			if _, err := f.tasks.GetByIDForUpdate(ctx, taskID); err != nil {
+				return err
+			}
+			close(lockedCh)
+			<-releaseCh
+			return nil
+		})
+	}()
+
+	<-lockedCh
+	time.AfterFunc(150*time.Millisecond, func() { close(releaseCh) })
+
+	start := time.Now()
+	err = manager.WithinTx(ctx, func(ctx context.Context) error {
+		_, err := f.tasks.GetByIDForUpdate(ctx, taskID)
+		return err
+	})
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.NoError(t, <-firstTxErrCh)
+	assert.GreaterOrEqual(t, elapsed, 140*time.Millisecond,
+		"second reader should have blocked on the row lock until the first transaction released it")
 }

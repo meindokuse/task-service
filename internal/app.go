@@ -16,6 +16,7 @@ import (
 	"github.com/meindokuse/task-service/internal/pkg/closer"
 	"github.com/meindokuse/task-service/internal/pkg/connector"
 	"github.com/meindokuse/task-service/internal/pkg/jwtutil"
+	"github.com/meindokuse/task-service/internal/pkg/logger"
 )
 
 type App struct {
@@ -35,6 +36,7 @@ func New(ctx context.Context) *App {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	logger.Init(cfg.LogLevel)
 
 	db, err := connector.NewMySQL(cfg.MySQL)
 	if err != nil {

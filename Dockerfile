@@ -17,6 +17,7 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 COPY --from=builder /out/task-service ./task-service
 COPY config/config.yaml ./config/config.yaml
+COPY api/openapi.yaml ./api/openapi.yaml
 
 EXPOSE 8080
 

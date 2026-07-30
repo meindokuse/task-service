@@ -99,6 +99,8 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	if err := s.email.SendInvite(ctx, invitee.Email, team.Name); err != nil {
 		delivered = false
 		slog.Warn("invite email not delivered", "team_id", req.TeamID, "invitee_id", invitee.ID, "error", err)
+	} else {
+		slog.Info("invite email delivered", "team_id", req.TeamID, "invitee_id", invitee.ID)
 	}
 
 	return Response{UserID: invitee.ID, EmailDelivered: delivered}, nil

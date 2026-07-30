@@ -3,6 +3,7 @@ package create_team
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/meindokuse/task-service/internal/domain/entity"
@@ -59,6 +60,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	slog.Info("team created", "team_id", teamID, "created_by", req.CreatedBy)
 
 	return Response{TeamID: teamID}, nil
 }

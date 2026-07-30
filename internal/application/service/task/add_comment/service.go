@@ -4,6 +4,7 @@ package add_comment
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/meindokuse/task-service/internal/domain/entity"
@@ -69,6 +70,7 @@ func (s *Service) Execute(ctx context.Context, req Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	slog.Info("comment added", "task_id", req.TaskID, "comment_id", id, "actor_id", req.UserID)
 
 	return Response{CommentID: id}, nil
 }

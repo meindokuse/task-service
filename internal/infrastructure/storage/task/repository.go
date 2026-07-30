@@ -64,6 +64,29 @@ func (r *Repository) GetByID(ctx context.Context, id uint64) (*entity.Task, erro
 	return &t, nil
 }
 
+// GetByIDForUpdate reads the row with a row-level lock (FOR UPDATE) so a
+// caller running this inside txmanager.WithinTx can safely read-modify-write
+// without a concurrent update racing in between. Outside a transaction the
+// lock is released immediately (autocommit), so this must only be used
+// within WithinTx.
+func (r *Repository) GetByIDForUpdate(ctx context.Context, id uint64) (*entity.Task, error) {
+	var dao taskDAO
+	exec := txmanager.Ext(ctx, r.db)
+	err := sqlx.GetContext(ctx, exec, &dao, `
+		SELECT id, team_id, title, description, status, assignee_id, created_by, created_at, updated_at
+		FROM tasks WHERE id = ? FOR UPDATE`, id,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, terror.NotFound("task not found")
+	}
+	if err != nil {
+		return nil, terror.Internal("get task by id for update", err)
+	}
+
+	t := dao.toEntity()
+	return &t, nil
+}
+
 // List применяет фильтрацию и пагинацию на уровне БД, а также возвращает
 // общее количество строк (без учёта пагинации), чтобы вызывающий код мог
 // сформировать метаданные страницы.

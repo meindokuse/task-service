@@ -18,7 +18,7 @@ type mockTaskRepo struct {
 	updateFn func(ctx context.Context, t entity.Task) error
 }
 
-func (m *mockTaskRepo) GetByID(ctx context.Context, id uint64) (*entity.Task, error) {
+func (m *mockTaskRepo) GetByIDForUpdate(ctx context.Context, id uint64) (*entity.Task, error) {
 	task := m.task
 	return &task, nil
 }
@@ -300,7 +300,7 @@ func TestService_Execute_GetByIDErrorPropagates(t *testing.T) {
 
 type erroringTaskRepo struct{}
 
-func (erroringTaskRepo) GetByID(context.Context, uint64) (*entity.Task, error) {
+func (erroringTaskRepo) GetByIDForUpdate(context.Context, uint64) (*entity.Task, error) {
 	return nil, terror.NotFound("task not found")
 }
 

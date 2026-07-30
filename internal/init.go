@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	fiberSwagger "github.com/gofiber/swagger"
 	"github.com/golang-migrate/migrate/v4"
 	mysqlmigrate "github.com/golang-migrate/migrate/v4/database/mysql"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -149,10 +150,14 @@ func initServer(cfg *config.Config, tokenIssuer *jwtutil.Issuer, regs registries
 	})
 
 	app.Use(recover.New())
+	app.Use(appmw.RequestLogger())
 	app.Use(metrics.Middleware())
 
 	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 	app.Get("/healthz", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+
+	app.Static("/swagger/openapi.yaml", "./api/openapi.yaml")
+	app.Get("/swagger/*", fiberSwagger.New(fiberSwagger.Config{URL: "/swagger/openapi.yaml"}))
 
 	public := app.Group("/api/v1", appmw.RateLimitByIP())
 	authv1.New(regs.auth).RegisterRoutes(public)

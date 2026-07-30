@@ -5,6 +5,7 @@ package email
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/sony/gobreaker"
 
@@ -26,6 +27,9 @@ func NewClient(cfg config.EmailConfig) *Client {
 		Timeout:     cfg.BreakerTimeout,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			return counts.Requests >= 5 && float64(counts.TotalFailures)/float64(counts.Requests) >= 0.5
+		},
+		OnStateChange: func(name string, from, to gobreaker.State) {
+			slog.Warn("circuit breaker state change", "breaker", name, "from", from.String(), "to", to.String())
 		},
 	}
 
